@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+moodtune-final/node_modules/
+moodtune-final/frontend/node_modules/
+
+# Production builds
+build/
+dist/
+moodtune-final/build/
+moodtune-final/frontend/build/
+
+# Virtual environments
+venv/
+.venv/
+moodtune-final/backend/venv/
+moodtune-final/backend/.venv/
+
+# Environment files
+.env
+.env.local
+moodtune-final/backend/.env
+moodtune-final/frontend/.env.local
+
+# Databases and logs
+*.db
+*.log
+moodtune-final/backend/*.db
+moodtune-final/backend/*.log
+
+# Editor configurations
+.vscode/
+.idea/

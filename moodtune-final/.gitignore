@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Production builds
+build/
+frontend/build/
+dist/
+
+# Virtual environments
+venv/
+.venv/
+backend/venv/
+backend/.venv/
+
+# Environment files
+.env
+backend/.env
+.env.local
+frontend/.env.local
+
+# Databases and logs
+*.db
+*.log
+backend/*.db
+backend/*.log
+
+# Editor configurations
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
