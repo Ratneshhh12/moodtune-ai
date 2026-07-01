@@ -34,5 +34,10 @@
     "development": [
       "last 1 chrome version"
     ]
+  },
+  "browser": {
+    "fs": false,
+    "path": false,
+    "os": false
   }
 }
