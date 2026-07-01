@@ -4,7 +4,7 @@
  * Calculates: Stress, Anxiety, Fatigue wellness indicators
  */
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import * as faceapi from 'face-api.js';
+import * as faceapi from '@vladmandic/face-api';
 import { useApp } from '../../context/AppContext';
 
 const EMOTION_CONFIG = {
