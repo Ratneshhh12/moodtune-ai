@@ -3,13 +3,18 @@ MoodTune AI - Main Flask Application
 Production-ready backend with JWT auth, MySQL, Spotify API
 """
 import os
+import sys
 import logging
+# Add backend directory to path to allow correct imports on Vercel serverless functions
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from flask import Flask, jsonify
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from flask_mail import Mail
 from dotenv import load_dotenv
 from config.database import init_db, db
+
 from models.chat_log import ChatLog
 from models.history import History
 from models.journal import JournalEntry
