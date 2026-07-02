@@ -34,7 +34,7 @@ export default function Login() {
     const initGoogle = () => {
       if (window.google) {
         google.accounts.id.initialize({
-          client_id: process.env.REACT_APP_GOOGLE_CLIENT_ID || "333069151520-22cuf8o3ghrgrshg7660a927p78r6c6c.apps.googleusercontent.com",
+          client_id: process.env.REACT_APP_GOOGLE_CLIENT_ID || "288803437433-123efttbeijfe740upd1dnk6lfrs2f6k.apps.googleusercontent.com",
           callback: handleGoogleLogin
         });
         const btn = document.getElementById("google-signin-btn");
