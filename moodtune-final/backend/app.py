@@ -83,6 +83,40 @@ def create_app():
     def health():
         return jsonify({'status': 'ok', 'service': 'MoodTune AI'}), 200
 
+    # Diagnostic DB check
+    @app.route('/api/db-test', methods=['GET'])
+    def db_test():
+        from sqlalchemy import text
+        import traceback
+        import sys
+        
+        # Mask sensitive password characters in debug info
+        password = os.getenv('DB_PASSWORD', '')
+        masked_password = password[:2] + '*' * (len(password) - 4) + password[-2:] if len(password) > 4 else '***'
+        
+        info = {
+            'db_type': os.getenv('DB_TYPE', 'mysql'),
+            'db_user': os.getenv('DB_USER', 'root'),
+            'db_host': os.getenv('DB_HOST', 'localhost'),
+            'db_port': os.getenv('DB_PORT', '3306'),
+            'db_name': os.getenv('DB_NAME', 'moodtune_db'),
+            'password_len': len(password),
+            'masked_password': masked_password,
+            'python_version': sys.version
+        }
+        
+        try:
+            # Attempt a quick query
+            db.session.execute(text('SELECT 1'))
+            info['status'] = 'connected'
+            return jsonify(info), 200
+        except Exception as e:
+            info['status'] = 'failed'
+            info['error'] = str(e)
+            info['traceback'] = traceback.format_exc()
+            return jsonify(info), 500
+
+
     # Error handlers
     @app.errorhandler(404)
     def not_found(e):
