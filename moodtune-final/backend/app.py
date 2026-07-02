@@ -101,19 +101,23 @@ def create_app():
     def invalid_token(error):
         return jsonify({'error': 'Invalid token'}), 401
 
-    # Create DB tables and seed admin and songs
-    with app.app_context():
-        db.create_all()
-        # Migration: Add prompt column to journal_entries if it doesn't exist (SQLite safe check)
-        try:
-            db.session.execute(db.text("ALTER TABLE journal_entries ADD COLUMN prompt VARCHAR(255)"))
-            db.session.commit()
-            logger.info("Database migration: prompt column successfully added to journal_entries")
-        except Exception:
-            db.session.rollback()
-        _seed_admin()
-        _seed_songs()
-        logger.info("MoodTune AI backend started")
+    # Create DB tables and seed admin and songs (skip on Vercel cold start to prevent timeouts)
+    if not os.getenv('VERCEL') or os.getenv('INIT_DB') == 'True':
+        with app.app_context():
+            try:
+                db.create_all()
+                # Migration: Add prompt column to journal_entries if it doesn't exist (SQLite safe check)
+                try:
+                    db.session.execute(db.text("ALTER TABLE journal_entries ADD COLUMN prompt VARCHAR(255)"))
+                    db.session.commit()
+                    logger.info("Database migration: prompt column successfully added to journal_entries")
+                except Exception:
+                    db.session.rollback()
+                _seed_admin()
+                _seed_songs()
+                logger.info("MoodTune AI database initialized and seeded")
+            except Exception as e:
+                logger.error(f"Failed to initialize database: {e}")
 
     return app
 

@@ -272,8 +272,14 @@ export function AppProvider({ children }) {
 
   // ---- Toasts ----
   const toast = useCallback((message, type = 'info') => {
+    let msgStr = '';
+    if (message && typeof message === 'object') {
+      msgStr = message.message || message.error || JSON.stringify(message);
+    } else {
+      msgStr = String(message || '');
+    }
     const id = Date.now();
-    setToasts(prev => [...prev, { id, message, type }]);
+    setToasts(prev => [...prev, { id, message: msgStr, type }]);
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500);
   }, []);
 
