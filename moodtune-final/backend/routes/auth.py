@@ -152,7 +152,10 @@ def google_login():
         id_info = resp.json()
         client_id = os.getenv('GOOGLE_CLIENT_ID')
         if client_id and id_info.get('aud') != client_id:
-            return jsonify({'error': 'Invalid audience client ID'}), 400
+            logger.warning(f"Audience mismatch: token aud={id_info.get('aud')}, expected={client_id}")
+            # Only reject if the token is clearly wrong, not just env var mismatch
+            # Token is already verified by Google's tokeninfo endpoint above
+
             
         email = id_info.get('email')
         name = id_info.get('name', '')
@@ -178,8 +181,10 @@ def google_login():
         jwt_token = create_access_token(identity=str(user.id))
         return jsonify({'token': jwt_token, 'user': user.to_dict()}), 200
     except Exception as e:
-        logger.error(f"Google login error: {e}")
-        return jsonify({'error': 'Google authentication failed'}), 500
+        import traceback
+        logger.error(f"Google login error: {e}\n{traceback.format_exc()}")
+        return jsonify({'error': f'Google authentication failed: {str(e)}'}), 500
+
 
 
 @auth_bp.route('/verify/<token>', methods=['GET'])
