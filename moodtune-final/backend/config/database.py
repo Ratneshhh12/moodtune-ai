@@ -54,6 +54,11 @@ def init_db(app):
 
     app.config['SQLALCHEMY_DATABASE_URI'] = uri
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {'pool_recycle': 300, 'pool_pre_ping': True}
+    
+    engine_options = {'pool_recycle': 300, 'pool_pre_ping': True}
+    if db_type in ('mysql', 'mysql+pymysql') and host not in ('localhost', '127.0.0.1'):
+        engine_options['connect_args'] = {'ssl': {}}
+        
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = engine_options
     db.init_app(app)
     return db

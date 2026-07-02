@@ -23,13 +23,17 @@ from models.notification import Notification
 load_dotenv(override=True)
 
 # Configure logging
+handlers = [logging.StreamHandler()]
+if not os.getenv('VERCEL'):
+    try:
+        handlers.append(logging.FileHandler('moodtune.log', mode='a'))
+    except Exception:
+        pass
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('moodtune.log', mode='a')
-    ]
+    handlers=handlers
 )
 logger = logging.getLogger(__name__)
 
