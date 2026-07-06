@@ -10,6 +10,23 @@ import logging
 logger = logging.getLogger(__name__)
 auth_bp = Blueprint('auth', __name__)
 
+@auth_bp.route('/dns-test', methods=['GET'])
+def dns_test():
+    import socket
+    results = {}
+    hosts = [
+        'google.com',
+        'api.vercel.com',
+        'mysql-29a94c54-mooodtune-5484.j.aivencloud.com'
+    ]
+    for h in hosts:
+        try:
+            addr = socket.getaddrinfo(h, 80)
+            results[h] = {'status': 'OK', 'addr': str(addr[0][4])}
+        except Exception as e:
+            results[h] = {'status': 'ERROR', 'error': str(e)}
+    return jsonify(results), 200
+
 @auth_bp.route('/register', methods=['POST'])
 def register():
     try:
