@@ -117,45 +117,76 @@ def resolve_yt_audio():
 
     try:
         import yt_dlp
-        ydl_opts = {
-            # Prefer audio-only formats; fall back to any available
-            'format': 'bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best',
-            'noplaylist': True,
-            'quiet': True,
-            'skip_download': True,
-            'nocheckcertificate': True,
-            'check_formats': False,
-            'extractor_args': {'youtube': {'skip': ['dash', 'hls']}}
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            if use_direct_id:
-                entry = ydl.extract_info(resolve_target, download=False)
-            else:
-                info = ydl.extract_info(resolve_target, download=False)
-                entry = info['entries'][0] if ('entries' in info and len(info['entries']) > 0) else None
-
-            if entry:
-                stream_url = entry.get('url')
-                if not stream_url:
-                    # Try to get url from formats list
-                    formats = entry.get('formats', [])
-                    audio_formats = [f for f in formats if f.get('acodec') != 'none' and f.get('vcodec') == 'none']
-                    if audio_formats:
-                        stream_url = audio_formats[-1].get('url')
-                    elif formats:
-                        stream_url = formats[-1].get('url')
-
-                if stream_url:
-                    vid_id = entry.get('id', video_id)
-                    thumbnail = entry.get('thumbnail', f"https://img.youtube.com/vi/{vid_id}/hqdefault.jpg")
-                    res_data = {
-                        'url': stream_url,
-                        'title': entry.get('title', title),
-                        'thumbnail': thumbnail
+        
+        # Try different YouTube player clients sequentially to bypass "Confirm you're not a bot" blocks
+        clients_to_try = [
+            ['ios'],
+            ['android'],
+            ['mweb'],
+            ['web_creator'],
+            ['web']
+        ]
+        
+        entry = None
+        last_error = None
+        
+        for client in clients_to_try:
+            ydl_opts = {
+                # Prefer audio-only formats; fall back to any available
+                'format': 'bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best',
+                'noplaylist': True,
+                'quiet': True,
+                'skip_download': True,
+                'nocheckcertificate': True,
+                'check_formats': False,
+                'cachedir': False,  # Disable caching to prevent issues on read-only serverless filesystems
+                'extractor_args': {
+                    'youtube': {
+                        'skip': ['dash', 'hls'],
+                        'player_client': client
                     }
-                    # Cache the result for 2 hours (7200 seconds)
-                    RESOLVE_YT_CACHE[cache_key] = (res_data, now + 7200)
-                    return jsonify(res_data), 200
+                }
+            }
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    if use_direct_id:
+                        entry = ydl.extract_info(resolve_target, download=False)
+                    else:
+                        info = ydl.extract_info(resolve_target, download=False)
+                        entry = info['entries'][0] if ('entries' in info and len(info['entries']) > 0) else None
+                    
+                    if entry:
+                        break
+            except Exception as e:
+                last_error = e
+                logger.warning(f"yt-dlp resolution failed with client {client}: {e}")
+                continue
+
+        if not entry:
+            raise last_error or Exception("All player clients failed to extract video info")
+
+        if entry:
+            stream_url = entry.get('url')
+            if not stream_url:
+                # Try to get url from formats list
+                formats = entry.get('formats', [])
+                audio_formats = [f for f in formats if f.get('acodec') != 'none' and f.get('vcodec') == 'none']
+                if audio_formats:
+                    stream_url = audio_formats[-1].get('url')
+                elif formats:
+                    stream_url = formats[-1].get('url')
+
+            if stream_url:
+                vid_id = entry.get('id', video_id)
+                thumbnail = entry.get('thumbnail', f"https://img.youtube.com/vi/{vid_id}/hqdefault.jpg")
+                res_data = {
+                    'url': stream_url,
+                    'title': entry.get('title', title),
+                    'thumbnail': thumbnail
+                }
+                # Cache the result for 2 hours (7200 seconds)
+                RESOLVE_YT_CACHE[cache_key] = (res_data, now + 7200)
+                return jsonify(res_data), 200
 
         return jsonify({'error': 'No streamable URL found'}), 404
 
