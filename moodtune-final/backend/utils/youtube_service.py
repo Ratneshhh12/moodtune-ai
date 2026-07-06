@@ -10364,22 +10364,81 @@ def search_songs_yt_dlp(query, limit=10):
         return []
 
 def _search_fallback_db(query, limit=20):
-    """Fast case-insensitive search through the local FALLBACK_SONGS database"""
+    """Token-based scoring search through the local 1213 fallback songs database"""
+    import re
+    query_clean = re.sub(r'[^\w\s]', '', query.lower()).strip()
+    if not query_clean:
+        return []
+    
+    # Split query into words and remove common filler words
+    filler_words = {'song', 'songs', 'music', 'mp3', 'download', 'video', 'lyrics', 'full', 'audio'}
+    words = [w for w in query_clean.split() if w not in filler_words]
+    if not words:
+        words = query_clean.split()
+        
+    scored_results = []
     seen = set()
-    results = []
-    q = query.lower()
-    for songs in FALLBACK_SONGS.values():
+    
+    for mood, songs in FALLBACK_SONGS.items():
         for s in songs:
-            if q in s['title'].lower() or q in s['artist'].lower() or q in s.get('genre', '').lower():
-                key = f"{s['title'].lower()}|{s['artist'].lower()}"
-                if key not in seen:
-                    seen.add(key)
-                    results.append(s)
-    return results[:limit]
+            key = f"{s['title'].lower()}|{s['artist'].lower()}"
+            if key in seen:
+                continue
+                
+            title_clean = re.sub(r'[^\w\s]', '', s['title'].lower())
+            artist_clean = re.sub(r'[^\w\s]', '', s['artist'].lower())
+            genre_clean = re.sub(r'[^\w\s]', '', s.get('genre', '').lower())
+            
+            score = 0
+            matched_words = 0
+            
+            # Exact title match boost
+            if query_clean == title_clean:
+                score += 500
+            elif query_clean in title_clean:
+                score += 200
+                
+            # Exact artist match boost
+            if query_clean == artist_clean:
+                score += 300
+            elif query_clean in artist_clean:
+                score += 150
+                
+            # Word-by-word match
+            for w in words:
+                word_matched = False
+                if w in title_clean:
+                    score += 50
+                    word_matched = True
+                if w in artist_clean:
+                    score += 40
+                    word_matched = True
+                if w in genre_clean:
+                    score += 10
+                    word_matched = True
+                if word_matched:
+                    matched_words += 1
+            
+            # If all query words matched, give a big boost
+            if len(words) > 0 and matched_words == len(words):
+                score += 100
+                
+            if score > 0:
+                scored_results.append((score, s))
+                seen.add(key)
+                
+    # Sort by score descending and return limit
+    scored_results.sort(key=lambda x: x[0], reverse=True)
+    return [item[1] for item in scored_results[:limit]]
 
 def search_songs(query, limit=20):
-    """Search songs by title or artist using YouTube API → yt-dlp → local DB"""
-    # 1. YouTube Data API v3 (requires YOUTUBE_API_KEY)
+    """Search songs by title or artist, prioritizing the local fallback database"""
+    # 1. Try local fallback database first (high quality, no network, 100% playable)
+    local_results = _search_fallback_db(query, limit)
+    if len(local_results) >= 5:
+        return local_results
+
+    # 2. YouTube Data API v3 (requires YOUTUBE_API_KEY)
     api_key = os.getenv('YOUTUBE_API_KEY')
     if api_key:
         try:
@@ -10417,18 +10476,22 @@ def search_songs(query, limit=20):
                         'spotify_url': f"https://www.youtube.com/watch?v={video_id}"
                     })
                 if tracks:
-                    return tracks
+                    # Append local results if any
+                    seen_titles = {t['title'].lower() for t in tracks}
+                    for lr in local_results:
+                        if lr['title'].lower() not in seen_titles:
+                            tracks.append(lr)
+                    return tracks[:limit]
             else:
                 logger.warning(f"YouTube Search API returned {resp.status_code}")
         except Exception as e:
             logger.warning(f"YouTube Data API search failed: {e}")
 
-    # 2. Local fallback DB first (instant, no network)
-    local_results = _search_fallback_db(query, limit)
+    # 3. Fallback to local results if YouTube search failed or returned nothing
     if local_results:
         return local_results
 
-    # 3. yt-dlp metadata search (network, but no JS runtime required with extract_flat)
+    # 4. yt-dlp metadata search (network, but no JS runtime required with extract_flat)
     yt_tracks = search_songs_yt_dlp(query, limit)
     if yt_tracks:
         return yt_tracks
