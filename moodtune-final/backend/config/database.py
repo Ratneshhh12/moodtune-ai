@@ -58,6 +58,8 @@ def init_db(app):
     engine_options = {'pool_recycle': 300, 'pool_pre_ping': True}
     if db_type in ('mysql', 'mysql+pymysql') and host not in ('localhost', '127.0.0.1'):
         engine_options['connect_args'] = {'ssl': {}}
+        from sqlalchemy.pool import NullPool
+        engine_options['poolclass'] = NullPool
         
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = engine_options
     db.init_app(app)
