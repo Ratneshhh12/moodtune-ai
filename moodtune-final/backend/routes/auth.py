@@ -21,7 +21,7 @@ def dns_test():
     ]
     for h in hosts:
         try:
-            addr = socket.getaddrinfo(h, 80)
+            addr = socket.getaddrinfo(h, 80, family=socket.AF_INET)
             results[h] = {'status': 'OK', 'addr': str(addr[0][4])}
         except Exception as e:
             results[h] = {'status': 'ERROR', 'error': str(e)}
