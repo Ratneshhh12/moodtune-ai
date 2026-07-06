@@ -21,7 +21,11 @@ def init_db(app):
             f"mysql+pymysql://{user}:{quote_plus(password)}@{host}:{port}/"
             f"{os.getenv('DB_NAME','moodtune_db')}"
         )
-
+    elif db_type in ('postgresql', 'postgres', 'postgresql+pg8000'):
+        uri = (
+            f"postgresql+pg8000://{user}:{quote_plus(password)}@{host}:{port}/"
+            f"{os.getenv('DB_NAME','postgres')}"
+        )
     elif db_type in ('oracle', 'oracledb', 'oracle+oracledb'):
         # Oracle connection options. Prefer SERVICE name, fall back to SID.
         service = os.getenv('DB_SERVICE', '')
@@ -56,10 +60,11 @@ def init_db(app):
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     
     engine_options = {'pool_recycle': 300, 'pool_pre_ping': True}
-    if db_type in ('mysql', 'mysql+pymysql') and host not in ('localhost', '127.0.0.1'):
-        engine_options['connect_args'] = {'ssl': {}}
+    if host not in ('localhost', '127.0.0.1'):
         from sqlalchemy.pool import NullPool
         engine_options['poolclass'] = NullPool
+        if db_type in ('mysql', 'mysql+pymysql'):
+            engine_options['connect_args'] = {'ssl': {}}
         
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = engine_options
     db.init_app(app)

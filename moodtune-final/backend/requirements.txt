@@ -15,5 +15,8 @@ gunicorn==21.2.0
 oracledb>=1.0.0
 cryptography>=42.0.0
 yt-dlp
+pg8000
+scramp
+
 
 
