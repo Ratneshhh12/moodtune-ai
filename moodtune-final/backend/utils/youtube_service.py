@@ -10432,13 +10432,10 @@ def _search_fallback_db(query, limit=20):
     return [item[1] for item in scored_results[:limit]]
 
 def search_songs(query, limit=20):
-    """Search songs by title or artist, prioritizing the local fallback database"""
-    # 1. Try local fallback database first (high quality, no network, 100% playable)
+    """Search songs by title or artist, prioritizing YouTube if API key is present"""
     local_results = _search_fallback_db(query, limit)
-    if len(local_results) >= 1:
-        return local_results
 
-    # 2. YouTube Data API v3 (requires YOUTUBE_API_KEY)
+    # 1. YouTube Data API v3 (requires YOUTUBE_API_KEY)
     api_key = os.getenv('YOUTUBE_API_KEY')
     if api_key:
         try:
