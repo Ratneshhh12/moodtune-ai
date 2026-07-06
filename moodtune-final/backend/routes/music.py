@@ -192,6 +192,26 @@ def resolve_yt_audio():
 
     except Exception as e:
         logger.error(f"Failed to resolve YT audio for '{query}' (direct={use_direct_id}): {e}")
+        
+        # Fallback: search the local playable database for the best matching song
+        try:
+            from utils.youtube_service import _search_fallback_db
+            local_matches = _search_fallback_db(title, limit=3)
+            if not local_matches and artist:
+                local_matches = _search_fallback_db(f"{title} {artist}", limit=3)
+                
+            if local_matches:
+                fallback_song = local_matches[0]
+                logger.info(f"Fallback resolution successful! Serving local song: {fallback_song['title']}")
+                res_data = {
+                    'url': fallback_song['preview_url'],
+                    'title': fallback_song['title'],
+                    'thumbnail': fallback_song.get('cover_url', '')
+                }
+                return jsonify(res_data), 200
+        except Exception as fe:
+            logger.error(f"Resolver fallback search failed: {fe}")
+            
         return jsonify({'error': str(e)}), 500
 
 

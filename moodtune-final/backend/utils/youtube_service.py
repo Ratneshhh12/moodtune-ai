@@ -10435,7 +10435,7 @@ def search_songs(query, limit=20):
     """Search songs by title or artist, prioritizing the local fallback database"""
     # 1. Try local fallback database first (high quality, no network, 100% playable)
     local_results = _search_fallback_db(query, limit)
-    if len(local_results) >= 5:
+    if len(local_results) >= 1:
         return local_results
 
     # 2. YouTube Data API v3 (requires YOUTUBE_API_KEY)
