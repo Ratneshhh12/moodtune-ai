@@ -34,6 +34,34 @@ ALLOWED_AUDIO_HOSTS = [
     'fastly.net',           # CDN used by some audio hosts
 ]
 
+@music_bp.route('/test-piped', methods=['GET'])
+def test_piped():
+    import urllib.request, json
+    instances = [
+        'https://piped-api.lunar.icu',
+        'https://piped-api.us.to',
+        'https://piped-api.privacy.com.de',
+        'https://piped-api.privacydev.net',
+        'https://piped-api.kavin.rocks',
+        'https://api.piped.yt'
+    ]
+    video_id = request.args.get('video_id', 'BddP6PYo2gs')
+    results = {}
+    for inst in instances:
+        url = f"{inst}/streams/{video_id}"
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=5) as r:
+                data = json.loads(r.read())
+                audio = data.get('audioStreams', [])
+                if audio:
+                    results[inst] = {'status': 'OK', 'url': audio[0]['url'][:100]}
+                else:
+                    results[inst] = {'status': 'NO_AUDIO'}
+        except Exception as e:
+            results[inst] = {'status': 'ERROR', 'error': str(e)}
+    return jsonify(results), 200
+
 @music_bp.route('/proxy-audio', methods=['GET'])
 def proxy_audio():
     """Proxy audio streams to bypass browser CORS restrictions."""
