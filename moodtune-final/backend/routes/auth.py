@@ -75,8 +75,10 @@ def login():
         token = create_access_token(identity=str(user.id))
         return jsonify({'token': token, 'user': user.to_dict()}), 200
     except Exception as e:
-        logger.error(f"Login error: {e}")
-        return jsonify({'error': 'Login failed'}), 500
+        import traceback
+        tb = traceback.format_exc()
+        logger.error(f"Login error: {e}\n{tb}")
+        return jsonify({'error': f"Login failed: {str(e)}", 'traceback': tb}), 500
 
 @auth_bp.route('/resend-verification', methods=['POST'])
 def resend_verification():
