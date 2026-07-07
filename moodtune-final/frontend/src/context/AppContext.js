@@ -22,7 +22,8 @@ const proxyAudioUrl = (url) => {
     url.includes('youtu.be') ||
     url.includes('invidious') ||
     url.includes('yewtu.be') ||
-    url.includes('nadeko.net')
+    url.includes('nadeko.net') ||
+    url.includes('googlevideo.com')
   ) {
     return url;
   }
