@@ -160,6 +160,7 @@ input:focus,textarea:focus,select:focus{border-color:var(--accent-primary);box-s
   .main-content {
     margin-left: 0 !important;
     padding-bottom: calc(var(--player-height) + var(--mobile-nav-height)) !important;
+    min-width: 0 !important;
   }
   .page-content {
     padding: 16px 12px;

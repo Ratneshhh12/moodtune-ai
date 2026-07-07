@@ -10433,7 +10433,7 @@ def _search_fallback_db(query, limit=20):
 
 def search_via_piped(query, limit=10):
     """Fallback search using public Piped API instances to bypass YouTube API Key blocks"""
-    import urllib.request, urllib.parse, json
+    import urllib.parse
     instances = [
         'https://piped-api.lunar.icu',
         'https://piped-api.us.to',
@@ -10446,16 +10446,16 @@ def search_via_piped(query, limit=10):
     for inst in instances:
         url = f"{inst}/search?q={urllib.parse.quote(query)}&filter=music_songs"
         try:
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req, timeout=3) as r:
-                data = json.loads(r.read())
+            resp = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=3)
+            if resp.status_code == 200:
+                data = resp.json()
                 items = data.get('items', [])
                 # Fall back to general videos filter if no songs found
                 if not items:
                     url_fallback = f"{inst}/search?q={urllib.parse.quote(query)}&filter=videos"
-                    req_fb = urllib.request.Request(url_fallback, headers={'User-Agent': 'Mozilla/5.0'})
-                    with urllib.request.urlopen(req_fb, timeout=3) as r_fb:
-                        data = json.loads(r_fb.read())
+                    resp_fb = requests.get(url_fallback, headers={'User-Agent': 'Mozilla/5.0'}, timeout=3)
+                    if resp_fb.status_code == 200:
+                        data = resp_fb.json()
                         items = data.get('items', [])
                 
                 if items:
@@ -10486,7 +10486,6 @@ def search_via_piped(query, limit=10):
 
 def get_trending_via_piped(limit=12):
     """Fallback trending songs using public Piped API instances"""
-    import urllib.request, json
     instances = [
         'https://piped-api.lunar.icu',
         'https://piped-api.us.to',
@@ -10498,9 +10497,9 @@ def get_trending_via_piped(limit=12):
     for inst in instances:
         url = f"{inst}/trending?region=IN"
         try:
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req, timeout=3) as r:
-                data = json.loads(r.read())
+            resp = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=3)
+            if resp.status_code == 200:
+                data = resp.json()
                 tracks = []
                 for item in data:
                     if len(tracks) >= limit:

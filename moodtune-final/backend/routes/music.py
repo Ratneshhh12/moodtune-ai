@@ -90,7 +90,6 @@ def proxy_audio():
 
 
 def _resolve_via_piped(video_id):
-    import urllib.request, json
     instances = [
         'https://piped-api.lunar.icu',
         'https://piped-api.us.to',
@@ -102,9 +101,9 @@ def _resolve_via_piped(video_id):
     for inst in instances:
         url = f"{inst}/streams/{video_id}"
         try:
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req, timeout=3) as r:
-                data = json.loads(r.read())
+            resp = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=3)
+            if resp.status_code == 200:
+                data = resp.json()
                 audio_streams = data.get('audioStreams', [])
                 if audio_streams:
                     audio_url = audio_streams[0]['url']
