@@ -17,7 +17,13 @@ const API = axios.create({ baseURL: API_BASE });
 // Rewrite external URLs through our backend proxy to avoid CORS
 const proxyAudioUrl = (url) => {
   if (!url) return url;
-  if (url.includes('youtube.com') || url.includes('youtu.be')) {
+  if (
+    url.includes('youtube.com') ||
+    url.includes('youtu.be') ||
+    url.includes('invidious') ||
+    url.includes('yewtu.be') ||
+    url.includes('nadeko.net')
+  ) {
     return url;
   }
   if (url.startsWith('http') && !url.includes('localhost') && !url.includes('127.0.0.1')) {

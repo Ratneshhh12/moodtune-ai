@@ -18,6 +18,8 @@ yt-dlp
 pg8000
 scramp
 pytubefix
+numpy
+scikit-learn
 
 
 
