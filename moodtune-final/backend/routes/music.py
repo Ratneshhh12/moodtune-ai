@@ -1456,4 +1456,139 @@ def get_throwback():
         return jsonify({'error': 'Failed to load throwback history'}), 500
 
 
+@music_bp.route('/dashboard-data', methods=['GET'])
+@jwt_required()
+def get_dashboard_data():
+    """Batch dashboard endpoint to retrieve all data in a single request, reducing cold starts"""
+    try:
+        user_id = int(get_jwt_identity())
+        detected_emotion = request.args.get('emotion', 'neutral').lower()
+        limit = request.args.get('limit', 10, type=int)
+        
+        # 1. Trending Songs (Public data)
+        from utils.youtube_service import get_trending_songs
+        trending_songs = get_trending_songs(12)
+        
+        # 2. Recommendations (Personalized / Fallback)
+        from utils.recommendation_engine import get_personalized_recommendations
+        from utils.youtube_service import get_recommendations_by_mood
+        
+        personalized = False
+        recommendations = get_personalized_recommendations(user_id, detected_emotion, limit)
+        if recommendations:
+            personalized = True
+        else:
+            recommendations = get_recommendations_by_mood(detected_emotion, limit)
+            # Merge with DB
+            db_songs = Song.query.filter_by(mood=detected_emotion).limit(5).all()
+            db_list = [s.to_dict() for s in db_songs]
+            seen = set()
+            merged = []
+            for s in db_list + recommendations:
+                key = s.get('spotify_id') or s.get('title')
+                if key not in seen:
+                    seen.add(key)
+                    merged.append(s)
+            recommendations = merged[:limit]
+            
+        # 3. History
+        history_records = History.query.filter_by(user_id=user_id)\
+            .order_by(History.timestamp.desc()).limit(50).all()
+        history_list = [r.to_dict() for r in history_records]
+        
+        # 4. Favorites
+        favs = Favorite.query.filter_by(user_id=user_id).all()
+        favorites_list = [f.to_dict() for f in favs]
+        
+        # 5. Playlists
+        pl = Playlist.query.filter(
+            (Playlist.user_id == user_id) | 
+            (Playlist.collaborators.any(id=user_id))
+        ).all()
+        playlists_list = [p.to_dict() for p in pl]
+        
+        # 6. Insights
+        insights_data = None
+        try:
+            from utils.history_aggregator import get_user_insights
+            insights_data = get_user_insights(user_id)
+        except Exception as ie:
+            logger.error(f"Batch dashboard insights error: {ie}")
+            
+        # 7. Dynamic Mood
+        dmi_data = None
+        try:
+            from utils.mood_intelligence import predict_mood_intelligence
+            dmi_data = predict_mood_intelligence(user_id)
+        except Exception as me:
+            logger.error(f"Batch dashboard DMI error: {me}")
+            
+        # 8. Throwback
+        throwback_data = None
+        try:
+            from datetime import datetime, timedelta
+            now = datetime.utcnow()
+            start_date = now - timedelta(days=370)
+            end_date = now - timedelta(days=360)
+            
+            records = History.query.filter(
+                History.user_id == user_id,
+                History.emotion_detected == 'happy',
+                History.timestamp >= start_date,
+                History.timestamp <= end_date
+            ).all()
+            
+            if not records:
+                happy_songs = Song.query.filter_by(mood='happy').limit(4).all()
+                if len(happy_songs) < 3:
+                    happy_songs = Song.query.limit(4).all()
+                if happy_songs:
+                    target_date = now - timedelta(days=365)
+                    for i, song in enumerate(happy_songs):
+                        record = History(
+                            user_id=user_id,
+                            song_id=song.id,
+                            emotion_detected='happy',
+                            stress_detected=15 + i * 5,
+                            anxiety_detected=10 + i * 2,
+                            fatigue_detected=20 - i * 3,
+                            timestamp=target_date - timedelta(minutes=15 * i)
+                        )
+                        db.session.add(record)
+                    db.session.commit()
+                    records = History.query.filter(
+                        History.user_id == user_id,
+                        History.emotion_detected == 'happy',
+                        History.timestamp >= start_date,
+                        History.timestamp <= end_date
+                    ).all()
+            throwback_data = {
+                'throwback_date': (now - timedelta(days=365)).strftime('%d %B %Y'),
+                'songs': [r.song.to_dict() for r in records if r.song]
+            }
+        except Exception as te:
+            logger.error(f"Batch dashboard throwback error: {te}")
+            db.session.rollback()
+            
+        return jsonify({
+            'trending': trending_songs,
+            'recommendations': {
+                'mood': detected_emotion,
+                'recommendations': recommendations,
+                'personalized': personalized
+            },
+            'history': history_list,
+            'favorites': favorites_list,
+            'playlists': playlists_list,
+            'insights': insights_data,
+            'dynamic_mood': dmi_data,
+            'throwback': throwback_data
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Batch dashboard data route error: {e}")
+        return jsonify({'error': 'Failed to load batch dashboard data'}), 500
+
+
+
 

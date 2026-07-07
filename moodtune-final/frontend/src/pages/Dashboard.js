@@ -62,29 +62,24 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    Promise.all([
-      API.get('/music/trending'),
-      API.get(`/music/recommend/${detectedEmotion||'neutral'}`),
-      API.get('/music/history').catch(()=>({ data:{ history:[] } })),
-      API.get('/music/favorites').catch(()=>({ data:{ favorites:[] } })),
-      API.get('/music/playlists').catch(()=>({ data:{ playlists:[] } })),
-      API.get('/music/insights').catch(()=>({ data:null })),
-      API.get('/music/dynamic-mood').catch(()=>({ data:null })),
-      API.get('/music/throwback').catch(()=>({ data:null })),
-    ]).then(([t, r, h, f, p, ins, dmi, tb]) => {
-      setTrending(t.data.trending || []);
-      setRecommended(r.data.recommendations || []);
-      setIsPersonalized(r.data.personalized || false);
-      setStats({ plays: h.data.history?.length||0, favorites: f.data.favorites?.length||0, playlists: p.data.playlists?.length||0 });
-      setInsightsData(ins.data);
-      if (dmi && dmi.data) {
-        setDmiData(dmi.data);
-      }
-      if (tb && tb.data) {
-        setThrowbackData(tb.data);
-      }
-    }).catch(() => toast('Failed to load dashboard', 'error'))
-    .finally(() => setLoading(false));
+    setLoading(true);
+    API.get(`/music/dashboard-data?emotion=${detectedEmotion||'neutral'}`)
+      .then(res => {
+        const d = res.data;
+        setTrending(d.trending || []);
+        setRecommended(d.recommendations?.recommendations || []);
+        setIsPersonalized(d.recommendations?.personalized || false);
+        setStats({
+          plays: d.history?.length || 0,
+          favorites: d.favorites?.length || 0,
+          playlists: d.playlists?.length || 0
+        });
+        setInsightsData(d.insights);
+        setDmiData(d.dynamic_mood);
+        setThrowbackData(d.throwback);
+      })
+      .catch(() => toast('Failed to load dashboard', 'error'))
+      .finally(() => setLoading(false));
   }, [detectedEmotion]);
 
   const getMostFrequentMood = (weekData) => {
