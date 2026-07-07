@@ -129,8 +129,19 @@ def _resolve_via_piped(video_id):
             if resp.status_code == 200:
                 data = resp.json()
                 audio_streams = data.get('audioStreams', [])
+                audio_url = None
                 if audio_streams:
                     audio_url = audio_streams[0]['url']
+                else:
+                    # Fallback to combined video streams that contain audio (videoOnly is False)
+                    video_streams = data.get('videoStreams', [])
+                    playable_streams = [v for v in video_streams if not v.get('videoOnly', True)]
+                    if playable_streams:
+                        audio_url = playable_streams[0]['url']
+                    elif video_streams:
+                        audio_url = video_streams[0]['url']
+                
+                if audio_url:
                     thumbnail = data.get('thumbnailUrl', '')
                     title = data.get('title', '')
                     return {
