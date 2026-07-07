@@ -89,15 +89,39 @@ def proxy_audio():
         return jsonify({'error': 'Failed to stream audio'}), 500
 
 
-def _resolve_via_piped(video_id):
-    instances = [
+def _get_active_piped_instances():
+    hardcoded = [
+        'https://api.piped.private.coffee',
+        'https://pipedapi.tokhmi.xyz',
+        'https://pipedapi.leptons.xyz',
+        'https://pipedapi.kavin.rocks',
         'https://piped-api.lunar.icu',
-        'https://piped-api.us.to',
-        'https://piped-api.privacydev.net',
-        'https://piped-api.kavin.rocks',
-        'https://api.piped.yt',
-        'https://pipedapi.ox.rs'
+        'https://piped-api.us.to'
     ]
+    try:
+        resp = requests.get("https://piped-instances.kavin.rocks", timeout=3)
+        if resp.status_code == 200:
+            instances = resp.json()
+            fetched = []
+            for inst in instances:
+                api_url = inst.get('api_url')
+                if api_url and api_url.startswith('http'):
+                    fetched.append(api_url.strip('/'))
+            seen = set()
+            merged = []
+            for url in fetched + hardcoded:
+                url_clean = url.rstrip('/')
+                if url_clean not in seen:
+                    seen.add(url_clean)
+                    merged.append(url_clean)
+            return merged
+    except Exception:
+        pass
+    return hardcoded
+
+
+def _resolve_via_piped(video_id):
+    instances = _get_active_piped_instances()
     for inst in instances:
         url = f"{inst}/streams/{video_id}"
         try:

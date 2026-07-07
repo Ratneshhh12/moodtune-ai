@@ -10431,17 +10431,40 @@ def _search_fallback_db(query, limit=20):
     scored_results.sort(key=lambda x: x[0], reverse=True)
     return [item[1] for item in scored_results[:limit]]
 
+def _get_active_piped_instances():
+    hardcoded = [
+        'https://api.piped.private.coffee',
+        'https://pipedapi.tokhmi.xyz',
+        'https://pipedapi.leptons.xyz',
+        'https://pipedapi.kavin.rocks',
+        'https://piped-api.lunar.icu',
+        'https://piped-api.us.to'
+    ]
+    try:
+        resp = requests.get("https://piped-instances.kavin.rocks", timeout=3)
+        if resp.status_code == 200:
+            instances = resp.json()
+            fetched = []
+            for inst in instances:
+                api_url = inst.get('api_url')
+                if api_url and api_url.startswith('http'):
+                    fetched.append(api_url.strip('/'))
+            seen = set()
+            merged = []
+            for url in fetched + hardcoded:
+                url_clean = url.rstrip('/')
+                if url_clean not in seen:
+                    seen.add(url_clean)
+                    merged.append(url_clean)
+            return merged
+    except Exception:
+        pass
+    return hardcoded
+
 def search_via_piped(query, limit=10):
     """Fallback search using public Piped API instances to bypass YouTube API Key blocks"""
     import urllib.parse
-    instances = [
-        'https://piped-api.lunar.icu',
-        'https://piped-api.us.to',
-        'https://piped-api.privacydev.net',
-        'https://piped-api.kavin.rocks',
-        'https://api.piped.yt',
-        'https://pipedapi.ox.rs'
-    ]
+    instances = _get_active_piped_instances()
     # Try searching with music_songs filter first
     for inst in instances:
         url = f"{inst}/search?q={urllib.parse.quote(query)}&filter=music_songs"
@@ -10486,14 +10509,7 @@ def search_via_piped(query, limit=10):
 
 def get_trending_via_piped(limit=12):
     """Fallback trending songs using public Piped API instances"""
-    instances = [
-        'https://piped-api.lunar.icu',
-        'https://piped-api.us.to',
-        'https://piped-api.privacydev.net',
-        'https://piped-api.kavin.rocks',
-        'https://api.piped.yt',
-        'https://pipedapi.ox.rs'
-    ]
+    instances = _get_active_piped_instances()
     for inst in instances:
         url = f"{inst}/trending?region=IN"
         try:
