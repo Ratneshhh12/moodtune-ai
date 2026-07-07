@@ -10431,10 +10431,104 @@ def _search_fallback_db(query, limit=20):
     scored_results.sort(key=lambda x: x[0], reverse=True)
     return [item[1] for item in scored_results[:limit]]
 
-def search_songs(query, limit=20):
-    """Search songs by title or artist, prioritizing YouTube if API key is present"""
-    local_results = _search_fallback_db(query, limit)
+def search_via_piped(query, limit=10):
+    """Fallback search using public Piped API instances to bypass YouTube API Key blocks"""
+    import urllib.request, urllib.parse, json
+    instances = [
+        'https://piped-api.lunar.icu',
+        'https://piped-api.us.to',
+        'https://piped-api.privacydev.net',
+        'https://piped-api.kavin.rocks',
+        'https://api.piped.yt',
+        'https://pipedapi.ox.rs'
+    ]
+    # Try searching with music_songs filter first
+    for inst in instances:
+        url = f"{inst}/search?q={urllib.parse.quote(query)}&filter=music_songs"
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=3) as r:
+                data = json.loads(r.read())
+                items = data.get('items', [])
+                # Fall back to general videos filter if no songs found
+                if not items:
+                    url_fallback = f"{inst}/search?q={urllib.parse.quote(query)}&filter=videos"
+                    req_fb = urllib.request.Request(url_fallback, headers={'User-Agent': 'Mozilla/5.0'})
+                    with urllib.request.urlopen(req_fb, timeout=3) as r_fb:
+                        data = json.loads(r_fb.read())
+                        items = data.get('items', [])
+                
+                if items:
+                    tracks = []
+                    for item in items:
+                        if item.get('type') == 'stream':
+                            video_url = item.get('url', '')
+                            video_id = video_url.split('v=')[-1] if 'v=' in video_url else item.get('id')
+                            if not video_id:
+                                continue
+                            tracks.append({
+                                'title': item.get('title', ''),
+                                'artist': item.get('uploaderName', 'Unknown Artist'),
+                                'album': 'YouTube Music',
+                                'genre': 'pop',
+                                'mood': 'neutral',
+                                'duration': int(item.get('duration', 240)),
+                                'cover_url': item.get('thumbnail', f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"),
+                                'preview_url': f"https://www.youtube.com/watch?v={video_id}",
+                                'spotify_id': video_id,
+                                'spotify_url': f"https://www.youtube.com/watch?v={video_id}"
+                            })
+                    if tracks:
+                        return tracks[:limit]
+        except Exception as e:
+            logger.warning(f"Piped search failed for instance {inst}: {e}")
+    return []
 
+def get_trending_via_piped(limit=12):
+    """Fallback trending songs using public Piped API instances"""
+    import urllib.request, json
+    instances = [
+        'https://piped-api.lunar.icu',
+        'https://piped-api.us.to',
+        'https://piped-api.privacydev.net',
+        'https://piped-api.kavin.rocks',
+        'https://api.piped.yt',
+        'https://pipedapi.ox.rs'
+    ]
+    for inst in instances:
+        url = f"{inst}/trending?region=IN"
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=3) as r:
+                data = json.loads(r.read())
+                tracks = []
+                for item in data:
+                    if len(tracks) >= limit:
+                        break
+                    video_url = item.get('url', '')
+                    video_id = video_url.split('v=')[-1] if 'v=' in video_url else item.get('id')
+                    if not video_id:
+                        continue
+                    tracks.append({
+                        'title': item.get('title', ''),
+                        'artist': item.get('uploaderName', 'Unknown Artist'),
+                        'album': 'YouTube Music Trending',
+                        'genre': 'pop',
+                        'mood': 'neutral',
+                        'duration': int(item.get('duration', 240)),
+                        'cover_url': item.get('thumbnail', f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"),
+                        'preview_url': f"https://www.youtube.com/watch?v={video_id}",
+                        'spotify_id': video_id,
+                        'spotify_url': f"https://www.youtube.com/watch?v={video_id}"
+                    })
+                if tracks:
+                    return tracks
+        except Exception as e:
+            logger.warning(f"Piped trending failed for instance {inst}: {e}")
+    return []
+
+def search_songs(query, limit=20):
+    """Search songs by title or artist, prioritizing YouTube API and falling back to Piped"""
     # 1. YouTube Data API v3 (requires YOUTUBE_API_KEY)
     api_key = os.getenv('YOUTUBE_API_KEY')
     if api_key:
@@ -10474,6 +10568,7 @@ def search_songs(query, limit=20):
                     })
                 if tracks:
                     # Append local results if any
+                    local_results = _search_fallback_db(query, limit)
                     seen_titles = {t['title'].lower() for t in tracks}
                     for lr in local_results:
                         if lr['title'].lower() not in seen_titles:
@@ -10484,11 +10579,22 @@ def search_songs(query, limit=20):
         except Exception as e:
             logger.warning(f"YouTube Data API search failed: {e}")
 
-    # 3. Fallback to local results if YouTube search failed or returned nothing
+    # 2. Fallback to public Piped API search
+    piped_results = search_via_piped(query, limit)
+    if piped_results:
+        local_results = _search_fallback_db(query, limit)
+        seen_titles = {t['title'].lower() for t in piped_results}
+        for lr in local_results:
+            if lr['title'].lower() not in seen_titles:
+                piped_results.append(lr)
+        return piped_results[:limit]
+
+    # 3. Fallback to local fallback database
+    local_results = _search_fallback_db(query, limit)
     if local_results:
         return local_results
 
-    # 4. yt-dlp metadata search (network, but no JS runtime required with extract_flat)
+    # 4. Fallback to local yt-dlp search
     yt_tracks = search_songs_yt_dlp(query, limit)
     if yt_tracks:
         return yt_tracks
@@ -10496,24 +10602,21 @@ def search_songs(query, limit=20):
     return []
 
 def get_recommendations_by_mood(mood, limit=10):
-    """Get song recommendations based on detected emotion.
-    Uses YouTube API if key available, otherwise uses local FALLBACK_SONGS."""
+    """Get song recommendations based on detected emotion."""
     mood = mood.lower()
     if mood not in MOOD_MAP:
         mood = 'neutral'
 
-    # Use YouTube API if key is configured
-    api_key = os.getenv('YOUTUBE_API_KEY')
-    if api_key:
-        query = MOOD_MAP[mood]['keywords']
-        results = search_songs(query, limit)
-        if results:
-            for r in results:
-                r['mood'] = mood
-                r['genre'] = MOOD_MAP[mood]['genres'][0]
-            return results
+    # Try searching with mood keywords via search_songs
+    query = MOOD_MAP[mood]['keywords']
+    results = search_songs(query, limit)
+    if results:
+        for r in results:
+            r['mood'] = mood
+            r['genre'] = MOOD_MAP[mood]['genres'][0]
+        return results
 
-    # Instantly return from our rich local FALLBACK_SONGS database
+    # Fallback to local FALLBACK_SONGS
     fallback = FALLBACK_SONGS.get(mood, FALLBACK_SONGS.get('neutral', []))
     import random
     sample = list(fallback)
@@ -10521,7 +10624,8 @@ def get_recommendations_by_mood(mood, limit=10):
     return sample[:limit]
 
 def get_trending_songs(limit=12):
-    """Get trending/popular songs from YouTube mostPopular or local fallback."""
+    """Get trending/popular songs from YouTube or local fallback."""
+    # 1. Try YouTube Data API v3
     api_key = os.getenv('YOUTUBE_API_KEY')
     if api_key:
         try:
@@ -10532,7 +10636,7 @@ def get_trending_songs(limit=12):
                 "chart": "mostPopular",
                 "videoCategoryId": "10",  # Music category
                 "maxResults": limit,
-                "regionCode": "IN"  # India-focused for Bollywood/Hindi content
+                "regionCode": "IN"
             }
             resp = requests.get(url, params=params, timeout=10)
             if resp.status_code == 200:
@@ -10560,13 +10664,17 @@ def get_trending_songs(limit=12):
         except Exception as e:
             logger.warning(f"YouTube Trending API failed: {e}")
 
-    # Fallback: pick a diverse random mix from local DB across all moods
+    # 2. Try Piped trending fallback
+    piped_trending = get_trending_via_piped(limit)
+    if piped_trending:
+        return piped_trending
+
+    # 3. Local database fallback
     import random
     all_songs = []
     for songs in FALLBACK_SONGS.values():
         all_songs.extend(songs)
     random.shuffle(all_songs)
-    # Deduplicate by title
     seen = set()
     unique = []
     for s in all_songs:
