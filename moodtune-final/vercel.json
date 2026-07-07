@@ -23,8 +23,16 @@
       "dest": "backend/app.py"
     },
     {
+      "src": "/(static|css|js|images|fonts)/(.*)",
+      "dest": "frontend/$1/$2"
+    },
+    {
+      "src": "/(.*)\\.(js|css|png|jpg|jpeg|gif|ico|json|svg|txt|html|wasm|mp3|woff2|woff|ttf)$",
+      "dest": "frontend/$1.$2"
+    },
+    {
       "src": "/(.*)",
-      "dest": "frontend/$1"
+      "dest": "frontend/index.html"
     }
   ]
 }
