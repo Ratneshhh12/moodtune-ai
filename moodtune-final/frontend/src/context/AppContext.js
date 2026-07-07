@@ -180,17 +180,67 @@ export function AppProvider({ children }) {
 
     if (needsYtResolution) {
       try {
-        const res = await API.get(`/music/resolve-yt-audio?title=${encodeURIComponent(song.title)}&artist=${encodeURIComponent(song.artist)}&video_id=${encodeURIComponent(song.spotify_id || '')}`);
-        if (res.data && res.data.url) {
-          audioUrl = res.data.url;
-          if (res.data.thumbnail) {
-            song.cover_url = res.data.thumbnail;
-            setCurrentSong(prev => prev ? { ...prev, cover_url: res.data.thumbnail } : { ...song, cover_url: res.data.thumbnail });
+        let resolved = false;
+        if (song.spotify_id && song.spotify_id.length === 11 && !song.spotify_id.startsWith('custom') && !song.spotify_id.startsWith('nature') && !song.spotify_id.startsWith('meditation')) {
+          console.log(`Resolving song client-side: ${song.title} (${song.spotify_id})`);
+          
+          let instances = [
+            'https://api.piped.private.coffee',
+            'https://pipedapi.tokhmi.xyz',
+            'https://pipedapi.leptons.xyz',
+            'https://pipedapi.kavin.rocks'
+          ];
+          try {
+            const listRes = await fetch('https://piped-instances.kavin.rocks').then(r => r.json());
+            const fetched = listRes.map(i => i.api_url).filter(url => url && url.startsWith('http')).map(url => url.replace(/\/$/, ''));
+            if (fetched.length > 0) {
+              instances = [...new Set([...fetched, ...instances])];
+            }
+          } catch (listErr) {
+            console.warn('Could not fetch dynamic Piped instances list, using fallbacks:', listErr);
+          }
+
+          for (const inst of instances) {
+            try {
+              const res = await fetch(`${inst}/streams/${song.spotify_id}`).then(r => r.json());
+              let streamUrl = null;
+              if (res.audioStreams && res.audioStreams.length > 0) {
+                streamUrl = res.audioStreams[0].url;
+              } else if (res.videoStreams) {
+                const playable = res.videoStreams.find(v => !v.videoOnly);
+                if (playable) streamUrl = playable.url;
+                else if (res.videoStreams.length > 0) streamUrl = res.videoStreams[0].url;
+              }
+              
+              if (streamUrl) {
+                audioUrl = streamUrl;
+                resolved = true;
+                if (res.thumbnailUrl) {
+                  song.cover_url = res.thumbnailUrl;
+                  setCurrentSong(prev => prev ? { ...prev, cover_url: res.thumbnailUrl } : { ...song, cover_url: res.thumbnailUrl });
+                }
+                console.log(`Successfully resolved stream client-side via ${inst}`);
+                break;
+              }
+            } catch (err) {
+              console.warn(`Piped instance ${inst} failed to resolve stream:`, err);
+            }
+          }
+        }
+        
+        if (!resolved) {
+          console.log(`Client-side resolution failed/skipped. Falling back to backend resolver for ${song.title}...`);
+          const res = await API.get(`/music/resolve-yt-audio?title=${encodeURIComponent(song.title)}&artist=${encodeURIComponent(song.artist)}&video_id=${encodeURIComponent(song.spotify_id || '')}`);
+          if (res.data && res.data.url) {
+            audioUrl = res.data.url;
+            if (res.data.thumbnail) {
+              song.cover_url = res.data.thumbnail;
+              setCurrentSong(prev => prev ? { ...prev, cover_url: res.data.thumbnail } : { ...song, cover_url: res.data.thumbnail });
+            }
           }
         }
       } catch (err) {
         console.warn('Failed to resolve YT audio:', err);
-        // Fall back to the original preview_url if yt-dlp resolution failed
         if (song.preview_url) audioUrl = song.preview_url;
       }
     }
