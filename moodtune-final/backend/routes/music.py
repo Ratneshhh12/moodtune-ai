@@ -89,6 +89,37 @@ def proxy_audio():
         return jsonify({'error': 'Failed to stream audio'}), 500
 
 
+def _resolve_via_piped(video_id):
+    import urllib.request, json
+    instances = [
+        'https://piped-api.lunar.icu',
+        'https://piped-api.us.to',
+        'https://piped-api.privacydev.net',
+        'https://piped-api.kavin.rocks',
+        'https://api.piped.yt',
+        'https://pipedapi.ox.rs'
+    ]
+    for inst in instances:
+        url = f"{inst}/streams/{video_id}"
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=3) as r:
+                data = json.loads(r.read())
+                audio_streams = data.get('audioStreams', [])
+                if audio_streams:
+                    audio_url = audio_streams[0]['url']
+                    thumbnail = data.get('thumbnailUrl', '')
+                    title = data.get('title', '')
+                    return {
+                        'url': audio_url,
+                        'title': title,
+                        'thumbnail': thumbnail
+                    }
+        except Exception as e:
+            logger.warning(f"Piped resolution failed for instance {inst}: {e}")
+    return None
+
+
 @music_bp.route('/resolve-yt-audio', methods=['GET'])
 def resolve_yt_audio():
     """Resolve YouTube audio stream URL for a song using yt-dlp"""
@@ -114,6 +145,16 @@ def resolve_yt_audio():
         if now < expiry:
             logger.info(f"Cache hit for resolving YT audio: {cache_key}")
             return jsonify(cached_data), 200
+
+    # Try Piped first if we have a direct video ID to bypass bot detection on Vercel
+    if video_id and len(video_id) == 11 and not video_id.startswith(('custom', 'nature', 'meditation')):
+        logger.info(f"Attempting to resolve video_id '{video_id}' via Piped API...")
+        piped_res = _resolve_via_piped(video_id)
+        if piped_res:
+            # Cache the result for 2 hours (7200 seconds)
+            RESOLVE_YT_CACHE[cache_key] = (piped_res, now + 7200)
+            logger.info(f"Successfully resolved video_id '{video_id}' via Piped!")
+            return jsonify(piped_res), 200
 
     try:
         from pytubefix import YouTube
