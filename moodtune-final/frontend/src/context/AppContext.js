@@ -14,6 +14,29 @@ const API_BASE = process.env.REACT_APP_API_URL || (
 );
 const API = axios.create({ baseURL: API_BASE });
 
+// Helper to return the first successful promise
+const promiseAny = (promises) => {
+  return new Promise((resolve, reject) => {
+    let rejectedCount = 0;
+    const errors = [];
+    if (promises.length === 0) {
+      reject(new Error('No promises provided'));
+      return;
+    }
+    promises.forEach((p, index) => {
+      Promise.resolve(p)
+        .then(resolve)
+        .catch(err => {
+          errors[index] = err;
+          rejectedCount++;
+          if (rejectedCount === promises.length) {
+            reject(new Error('All promises failed'));
+          }
+        });
+    });
+  });
+};
+
 // Rewrite external URLs through our backend proxy to avoid CORS
 const proxyAudioUrl = (url) => {
   if (!url) return url;
@@ -23,7 +46,9 @@ const proxyAudioUrl = (url) => {
     url.includes('invidious') ||
     url.includes('yewtu.be') ||
     url.includes('nadeko.net') ||
-    url.includes('googlevideo.com')
+    url.includes('googlevideo.com') ||
+    url.includes('archive.org') ||
+    url.includes('samplesongs.netlify.app')
   ) {
     return url;
   }
@@ -200,9 +225,16 @@ export function AppProvider({ children }) {
             console.warn('Could not fetch dynamic Piped instances list, using fallbacks:', listErr);
           }
 
-          for (const inst of instances) {
+          // Fetch from top 6 instances in parallel
+          const targets = instances.slice(0, 6);
+          const resolvePipedInstance = async (inst) => {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 4000); // 4 seconds timeout per fetch
             try {
-              const res = await fetch(`${inst}/streams/${song.spotify_id}`).then(r => r.json());
+              const res = await fetch(`${inst}/streams/${song.spotify_id}`, { signal: controller.signal }).then(r => {
+                clearTimeout(timeoutId);
+                return r.json();
+              });
               let streamUrl = null;
               if (res.audioStreams && res.audioStreams.length > 0) {
                 streamUrl = res.audioStreams[0].url;
@@ -213,18 +245,25 @@ export function AppProvider({ children }) {
               }
               
               if (streamUrl) {
-                audioUrl = streamUrl;
-                resolved = true;
-                if (res.thumbnailUrl) {
-                  song.cover_url = res.thumbnailUrl;
-                  setCurrentSong(prev => prev ? { ...prev, cover_url: res.thumbnailUrl } : { ...song, cover_url: res.thumbnailUrl });
-                }
-                console.log(`Successfully resolved stream client-side via ${inst}`);
-                break;
+                return { streamUrl, inst, thumbnailUrl: res.thumbnailUrl };
               }
-            } catch (err) {
-              console.warn(`Piped instance ${inst} failed to resolve stream:`, err);
+            } catch (e) {
+              clearTimeout(timeoutId);
             }
+            throw new Error(`Instance ${inst} failed`);
+          };
+
+          try {
+            const firstSuccess = await promiseAny(targets.map(resolvePipedInstance));
+            audioUrl = firstSuccess.streamUrl;
+            resolved = true;
+            if (firstSuccess.thumbnailUrl) {
+              song.cover_url = firstSuccess.thumbnailUrl;
+              setCurrentSong(prev => prev ? { ...prev, cover_url: firstSuccess.thumbnailUrl } : { ...song, cover_url: firstSuccess.thumbnailUrl });
+            }
+            console.log(`Successfully resolved stream client-side in parallel via ${firstSuccess.inst}`);
+          } catch (parallelErr) {
+            console.warn('All parallel Piped resolution attempts failed:', parallelErr);
           }
         }
         

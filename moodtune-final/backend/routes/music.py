@@ -15,6 +15,10 @@ import logging
 from urllib.parse import unquote
 
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Global executor for parallel Piped queries
+piped_executor = ThreadPoolExecutor(max_workers=25)
 
 logger = logging.getLogger(__name__)
 music_bp = Blueprint('music', __name__)
@@ -32,6 +36,9 @@ ALLOWED_AUDIO_HOSTS = [
     'samplesongs.netlify.app',
     'googlevideo.com',      # yt-dlp resolved audio stream host
     'fastly.net',           # CDN used by some audio hosts
+    'piped',                # allows Piped proxy subdomains
+    'private.coffee',
+    'kavin.rocks',
 ]
 
 @music_bp.route('/proxy-audio', methods=['GET'])
@@ -120,37 +127,49 @@ def _get_active_piped_instances():
     return hardcoded
 
 
+def _resolve_single_instance(inst, video_id):
+    url = f"{inst}/streams/{video_id}"
+    try:
+        resp = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=3)
+        if resp.status_code == 200:
+            data = resp.json()
+            audio_streams = data.get('audioStreams', [])
+            audio_url = None
+            if audio_streams:
+                audio_url = audio_streams[0]['url']
+            else:
+                # Fallback to combined video streams that contain audio (videoOnly is False)
+                video_streams = data.get('videoStreams', [])
+                playable_streams = [v for v in video_streams if not v.get('videoOnly', True)]
+                if playable_streams:
+                    audio_url = playable_streams[0]['url']
+                elif video_streams:
+                    audio_url = video_streams[0]['url']
+            
+            if audio_url:
+                thumbnail = data.get('thumbnailUrl', '')
+                title = data.get('title', '')
+                return {
+                    'url': audio_url,
+                    'title': title,
+                    'thumbnail': thumbnail
+                }
+    except Exception:
+        pass
+    return None
+
+
 def _resolve_via_piped(video_id):
     instances = _get_active_piped_instances()
-    for inst in instances:
-        url = f"{inst}/streams/{video_id}"
+    targets = instances[:10]
+    futures = [piped_executor.submit(_resolve_single_instance, inst, video_id) for inst in targets]
+    for future in as_completed(futures):
         try:
-            resp = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=3)
-            if resp.status_code == 200:
-                data = resp.json()
-                audio_streams = data.get('audioStreams', [])
-                audio_url = None
-                if audio_streams:
-                    audio_url = audio_streams[0]['url']
-                else:
-                    # Fallback to combined video streams that contain audio (videoOnly is False)
-                    video_streams = data.get('videoStreams', [])
-                    playable_streams = [v for v in video_streams if not v.get('videoOnly', True)]
-                    if playable_streams:
-                        audio_url = playable_streams[0]['url']
-                    elif video_streams:
-                        audio_url = video_streams[0]['url']
-                
-                if audio_url:
-                    thumbnail = data.get('thumbnailUrl', '')
-                    title = data.get('title', '')
-                    return {
-                        'url': audio_url,
-                        'title': title,
-                        'thumbnail': thumbnail
-                    }
-        except Exception as e:
-            logger.warning(f"Piped resolution failed for instance {inst}: {e}")
+            res = future.result()
+            if res:
+                return res
+        except Exception:
+            pass
     return None
 
 

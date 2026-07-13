@@ -5,6 +5,10 @@ import os
 import re
 import requests
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Global executor for parallel Piped queries
+piped_executor = ThreadPoolExecutor(max_workers=25)
 
 logger = logging.getLogger(__name__)
 
@@ -10461,85 +10465,108 @@ def _get_active_piped_instances():
         pass
     return hardcoded
 
+def _search_single_instance(inst, query, limit):
+    import urllib.parse
+    url = f"{inst}/search?q={urllib.parse.quote(query)}&filter=music_songs"
+    try:
+        resp = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=3)
+        if resp.status_code == 200:
+            data = resp.json()
+            items = data.get('items', [])
+            if not items:
+                url_fallback = f"{inst}/search?q={urllib.parse.quote(query)}&filter=videos"
+                resp_fb = requests.get(url_fallback, headers={'User-Agent': 'Mozilla/5.0'}, timeout=3)
+                if resp_fb.status_code == 200:
+                    data = resp_fb.json()
+                    items = data.get('items', [])
+            
+            if items:
+                tracks = []
+                for item in items:
+                    if item.get('type') == 'stream':
+                        video_url = item.get('url', '')
+                        video_id = video_url.split('v=')[-1] if 'v=' in video_url else item.get('id')
+                        if not video_id:
+                            continue
+                        tracks.append({
+                            'title': item.get('title', ''),
+                            'artist': item.get('uploaderName', 'Unknown Artist'),
+                            'album': 'YouTube Music',
+                            'genre': 'pop',
+                            'mood': 'neutral',
+                            'duration': int(item.get('duration', 240)),
+                            'cover_url': item.get('thumbnail', f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"),
+                            'preview_url': f"https://www.youtube.com/watch?v={video_id}",
+                            'spotify_id': video_id,
+                            'spotify_url': f"https://www.youtube.com/watch?v={video_id}"
+                        })
+                if tracks:
+                    return tracks[:limit]
+    except Exception:
+        pass
+    return None
+
+
 def search_via_piped(query, limit=10):
     """Fallback search using public Piped API instances to bypass YouTube API Key blocks"""
-    import urllib.parse
     instances = _get_active_piped_instances()
-    # Try searching with music_songs filter first
-    for inst in instances:
-        url = f"{inst}/search?q={urllib.parse.quote(query)}&filter=music_songs"
+    targets = instances[:10]
+    futures = [piped_executor.submit(_search_single_instance, inst, query, limit) for inst in targets]
+    for future in as_completed(futures):
         try:
-            resp = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=3)
-            if resp.status_code == 200:
-                data = resp.json()
-                items = data.get('items', [])
-                # Fall back to general videos filter if no songs found
-                if not items:
-                    url_fallback = f"{inst}/search?q={urllib.parse.quote(query)}&filter=videos"
-                    resp_fb = requests.get(url_fallback, headers={'User-Agent': 'Mozilla/5.0'}, timeout=3)
-                    if resp_fb.status_code == 200:
-                        data = resp_fb.json()
-                        items = data.get('items', [])
-                
-                if items:
-                    tracks = []
-                    for item in items:
-                        if item.get('type') == 'stream':
-                            video_url = item.get('url', '')
-                            video_id = video_url.split('v=')[-1] if 'v=' in video_url else item.get('id')
-                            if not video_id:
-                                continue
-                            tracks.append({
-                                'title': item.get('title', ''),
-                                'artist': item.get('uploaderName', 'Unknown Artist'),
-                                'album': 'YouTube Music',
-                                'genre': 'pop',
-                                'mood': 'neutral',
-                                'duration': int(item.get('duration', 240)),
-                                'cover_url': item.get('thumbnail', f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"),
-                                'preview_url': f"https://www.youtube.com/watch?v={video_id}",
-                                'spotify_id': video_id,
-                                'spotify_url': f"https://www.youtube.com/watch?v={video_id}"
-                            })
-                    if tracks:
-                        return tracks[:limit]
-        except Exception as e:
-            logger.warning(f"Piped search failed for instance {inst}: {e}")
+            res = future.result()
+            if res:
+                return res
+        except Exception:
+            pass
     return []
+
+
+def _trending_single_instance(inst, limit):
+    url = f"{inst}/trending?region=IN"
+    try:
+        resp = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=3)
+        if resp.status_code == 200:
+            data = resp.json()
+            tracks = []
+            for item in data:
+                if len(tracks) >= limit:
+                    break
+                video_url = item.get('url', '')
+                video_id = video_url.split('v=')[-1] if 'v=' in video_url else item.get('id')
+                if not video_id:
+                    continue
+                tracks.append({
+                    'title': item.get('title', ''),
+                    'artist': item.get('uploaderName', 'Unknown Artist'),
+                    'album': 'YouTube Music Trending',
+                    'genre': 'pop',
+                    'mood': 'neutral',
+                    'duration': int(item.get('duration', 240)),
+                    'cover_url': item.get('thumbnail', f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"),
+                    'preview_url': f"https://www.youtube.com/watch?v={video_id}",
+                    'spotify_id': video_id,
+                    'spotify_url': f"https://www.youtube.com/watch?v={video_id}"
+                })
+            if tracks:
+                return tracks
+    except Exception:
+        pass
+    return None
+
 
 def get_trending_via_piped(limit=12):
     """Fallback trending songs using public Piped API instances"""
     instances = _get_active_piped_instances()
-    for inst in instances:
-        url = f"{inst}/trending?region=IN"
+    targets = instances[:10]
+    futures = [piped_executor.submit(_trending_single_instance, inst, limit) for inst in targets]
+    for future in as_completed(futures):
         try:
-            resp = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=3)
-            if resp.status_code == 200:
-                data = resp.json()
-                tracks = []
-                for item in data:
-                    if len(tracks) >= limit:
-                        break
-                    video_url = item.get('url', '')
-                    video_id = video_url.split('v=')[-1] if 'v=' in video_url else item.get('id')
-                    if not video_id:
-                        continue
-                    tracks.append({
-                        'title': item.get('title', ''),
-                        'artist': item.get('uploaderName', 'Unknown Artist'),
-                        'album': 'YouTube Music Trending',
-                        'genre': 'pop',
-                        'mood': 'neutral',
-                        'duration': int(item.get('duration', 240)),
-                        'cover_url': item.get('thumbnail', f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"),
-                        'preview_url': f"https://www.youtube.com/watch?v={video_id}",
-                        'spotify_id': video_id,
-                        'spotify_url': f"https://www.youtube.com/watch?v={video_id}"
-                    })
-                if tracks:
-                    return tracks
-        except Exception as e:
-            logger.warning(f"Piped trending failed for instance {inst}: {e}")
+            res = future.result()
+            if res:
+                return res
+        except Exception:
+            pass
     return []
 
 def search_songs(query, limit=20):
