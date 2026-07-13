@@ -1585,8 +1585,10 @@ def get_dashboard_data():
                     merged.append(s)
             recommendations = merged[:limit]
             
-        # 3. History
+        # 3. History (pre-loaded with song to prevent N+1 queries)
+        from sqlalchemy.orm import joinedload
         history_records = History.query.filter_by(user_id=user_id)\
+            .options(joinedload(History.song))\
             .order_by(History.timestamp.desc()).limit(50).all()
         history_list = [r.to_dict() for r in history_records]
         
@@ -1625,12 +1627,13 @@ def get_dashboard_data():
             start_date = now - timedelta(days=370)
             end_date = now - timedelta(days=360)
             
+            from sqlalchemy.orm import joinedload
             records = History.query.filter(
                 History.user_id == user_id,
                 History.emotion_detected == 'happy',
                 History.timestamp >= start_date,
                 History.timestamp <= end_date
-            ).all()
+            ).options(joinedload(History.song)).all()
             
             if not records:
                 happy_songs = Song.query.filter_by(mood='happy').limit(4).all()
@@ -1655,7 +1658,7 @@ def get_dashboard_data():
                         History.emotion_detected == 'happy',
                         History.timestamp >= start_date,
                         History.timestamp <= end_date
-                    ).all()
+                    ).options(joinedload(History.song)).all()
             throwback_data = {
                 'throwback_date': (now - timedelta(days=365)).strftime('%d %B %Y'),
                 'songs': [r.song.to_dict() for r in records if r.song]

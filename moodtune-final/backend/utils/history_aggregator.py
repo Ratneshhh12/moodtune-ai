@@ -48,8 +48,11 @@ AI_RECS_MAP = {
 }
 
 def get_user_insights(user_id):
-    # Fetch user history
-    records = History.query.filter_by(user_id=user_id).order_by(History.timestamp.desc()).all()
+    # Fetch user history with song pre-loaded to prevent N+1 queries
+    from sqlalchemy.orm import joinedload
+    records = History.query.filter_by(user_id=user_id)\
+        .options(joinedload(History.song))\
+        .order_by(History.timestamp.desc()).all()
     
     # 1. Today's Mood
     today = datetime.utcnow().date()
