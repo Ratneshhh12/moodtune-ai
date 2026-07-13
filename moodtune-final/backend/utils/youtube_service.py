@@ -10,6 +10,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # Global executor for parallel Piped queries
 piped_executor = ThreadPoolExecutor(max_workers=25)
 
+import time
+
+# Internal caches to prevent duplicate YouTube/Piped API network requests
+SEARCH_CACHE = {}          # query -> (results, expiry)
+TRENDING_CACHE_DATA = None # results
+TRENDING_CACHE_EXPIRY = 0  # timestamp
+MOOD_REC_CACHE_DATA = {}   # mood -> (results, expiry)
+
 logger = logging.getLogger(__name__)
 
 # Mood to genre/search mapping
@@ -10571,6 +10579,16 @@ def get_trending_via_piped(limit=12):
 
 def search_songs(query, limit=20):
     """Search songs by title or artist, prioritizing YouTube API and falling back to Piped"""
+    query_key = query.strip().lower()
+    now_time = time.time()
+    if query_key in SEARCH_CACHE:
+        cached_data, expiry = SEARCH_CACHE[query_key]
+        if now_time < expiry:
+            logger.info(f"Cache hit for search_songs: {query_key}")
+            return cached_data[:limit]
+
+    results = []
+
     # 1. YouTube Data API v3 (requires YOUTUBE_API_KEY)
     api_key = os.getenv('YOUTUBE_API_KEY')
     if api_key:
@@ -10615,33 +10633,41 @@ def search_songs(query, limit=20):
                     for lr in local_results:
                         if lr['title'].lower() not in seen_titles:
                             tracks.append(lr)
-                    return tracks[:limit]
+                    results = tracks
             else:
                 logger.warning(f"YouTube Search API returned {resp.status_code}")
         except Exception as e:
             logger.warning(f"YouTube Data API search failed: {e}")
 
     # 2. Fallback to public Piped API search
-    piped_results = search_via_piped(query, limit)
-    if piped_results:
-        local_results = _search_fallback_db(query, limit)
-        seen_titles = {t['title'].lower() for t in piped_results}
-        for lr in local_results:
-            if lr['title'].lower() not in seen_titles:
-                piped_results.append(lr)
-        return piped_results[:limit]
+    if not results:
+        piped_results = search_via_piped(query, limit)
+        if piped_results:
+            local_results = _search_fallback_db(query, limit)
+            seen_titles = {t['title'].lower() for t in piped_results}
+            for lr in local_results:
+                if lr['title'].lower() not in seen_titles:
+                    piped_results.append(lr)
+            results = piped_results
 
     # 3. Fallback to local fallback database
-    local_results = _search_fallback_db(query, limit)
-    if local_results:
-        return local_results
+    if not results:
+        local_results = _search_fallback_db(query, limit)
+        if local_results:
+            results = local_results
 
     # 4. Fallback to local yt-dlp search
-    yt_tracks = search_songs_yt_dlp(query, limit)
-    if yt_tracks:
-        return yt_tracks
+    if not results:
+        yt_tracks = search_songs_yt_dlp(query, limit)
+        if yt_tracks:
+            results = yt_tracks
+
+    if results:
+        SEARCH_CACHE[query_key] = (results, now_time + 600)  # 10 minutes cache
+        return results[:limit]
 
     return []
+
 
 def get_recommendations_by_mood(mood, limit=10):
     """Get song recommendations based on detected emotion."""
@@ -10649,6 +10675,14 @@ def get_recommendations_by_mood(mood, limit=10):
     if mood not in MOOD_MAP:
         mood = 'neutral'
 
+    now_time = time.time()
+    if mood in MOOD_REC_CACHE_DATA:
+        cached_data, expiry = MOOD_REC_CACHE_DATA[mood]
+        if now_time < expiry:
+            logger.info(f"Cache hit for get_recommendations_by_mood: {mood}")
+            return cached_data[:limit]
+
+    results = []
     # Try searching with mood keywords via search_songs
     query = MOOD_MAP[mood]['keywords']
     results = search_songs(query, limit)
@@ -10656,17 +10690,30 @@ def get_recommendations_by_mood(mood, limit=10):
         for r in results:
             r['mood'] = mood
             r['genre'] = MOOD_MAP[mood]['genres'][0]
-        return results
+    else:
+        # Fallback to local FALLBACK_SONGS
+        fallback = FALLBACK_SONGS.get(mood, FALLBACK_SONGS.get('neutral', []))
+        import random
+        sample = list(fallback)
+        random.shuffle(sample)
+        results = sample
 
-    # Fallback to local FALLBACK_SONGS
-    fallback = FALLBACK_SONGS.get(mood, FALLBACK_SONGS.get('neutral', []))
-    import random
-    sample = list(fallback)
-    random.shuffle(sample)
-    return sample[:limit]
+    if results:
+        MOOD_REC_CACHE_DATA[mood] = (results, now_time + 300)  # 5 minutes cache
+        return results[:limit]
+
+    return []
+
 
 def get_trending_songs(limit=12):
     """Get trending/popular songs from YouTube or local fallback."""
+    global TRENDING_CACHE_DATA, TRENDING_CACHE_EXPIRY
+    now_time = time.time()
+    if TRENDING_CACHE_DATA is not None and now_time < TRENDING_CACHE_EXPIRY:
+        logger.info("Cache hit for get_trending_songs")
+        return TRENDING_CACHE_DATA[:limit]
+
+    tracks = []
     # 1. Try YouTube Data API v3
     api_key = os.getenv('YOUTUBE_API_KEY')
     if api_key:
@@ -10683,7 +10730,6 @@ def get_trending_songs(limit=12):
             resp = requests.get(url, params=params, timeout=10)
             if resp.status_code == 200:
                 data = resp.json()
-                tracks = []
                 for item in data.get('items', []):
                     video_id = item['id']
                     snippet = item['snippet']
@@ -10701,28 +10747,35 @@ def get_trending_songs(limit=12):
                         'spotify_id': video_id,
                         'spotify_url': f"https://www.youtube.com/watch?v={video_id}"
                     })
-                if tracks:
-                    return tracks
         except Exception as e:
             logger.warning(f"YouTube Trending API failed: {e}")
 
     # 2. Try Piped trending fallback
-    piped_trending = get_trending_via_piped(limit)
-    if piped_trending:
-        return piped_trending
+    if not tracks:
+        piped_trending = get_trending_via_piped(limit)
+        if piped_trending:
+            tracks = piped_trending
 
     # 3. Local database fallback
-    import random
-    all_songs = []
-    for songs in FALLBACK_SONGS.values():
-        all_songs.extend(songs)
-    random.shuffle(all_songs)
-    seen = set()
-    unique = []
-    for s in all_songs:
-        key = s['title'].lower()
-        if key not in seen:
-            seen.add(key)
-            unique.append(s)
-    return unique[:limit]
+    if not tracks:
+        import random
+        all_songs = []
+        for songs in FALLBACK_SONGS.values():
+            all_songs.extend(songs)
+        random.shuffle(all_songs)
+        seen = set()
+        unique = []
+        for s in all_songs:
+            key = s['title'].lower()
+            if key not in seen:
+                seen.add(key)
+                unique.append(s)
+        tracks = unique
+
+    if tracks:
+        TRENDING_CACHE_DATA = tracks
+        TRENDING_CACHE_EXPIRY = now_time + 300  # 5 minutes cache
+        return tracks[:limit]
+
+    return []
 
