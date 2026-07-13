@@ -1700,6 +1700,14 @@ def get_dashboard_data():
         logger.error(f"Batch dashboard data route error: {e}")
         return jsonify({'error': 'Failed to load batch dashboard data'}), 500
 
+@music_bp.route('/debug-code', methods=['GET'])
+def debug_code():
+    import inspect
+    from utils.mood_intelligence import predict_mood_intelligence
+    return jsonify({
+        'source': inspect.getsource(predict_mood_intelligence)[:1200]
+    }), 200
+
 
 
 
