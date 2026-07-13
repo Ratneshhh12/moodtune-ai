@@ -1554,6 +1554,8 @@ def get_throwback():
 @jwt_required()
 def get_dashboard_data():
     """Batch dashboard endpoint to retrieve all data in a single request, reducing cold starts"""
+    import time
+    t_start = time.time()
     try:
         user_id = int(get_jwt_identity())
         detected_emotion = request.args.get('emotion', 'neutral').lower()
@@ -1562,6 +1564,7 @@ def get_dashboard_data():
         # 1. Trending Songs (Public data)
         from utils.youtube_service import get_trending_songs
         trending_songs = get_trending_songs(12)
+        t_trending = time.time()
         
         # 2. Recommendations (Personalized / Fallback)
         from utils.recommendation_engine import get_personalized_recommendations
@@ -1584,6 +1587,7 @@ def get_dashboard_data():
                     seen.add(key)
                     merged.append(s)
             recommendations = merged[:limit]
+        t_rec = time.time()
             
         # 3. History (pre-loaded with song to prevent N+1 queries)
         from sqlalchemy.orm import joinedload
@@ -1591,6 +1595,7 @@ def get_dashboard_data():
             .options(joinedload(History.song))\
             .order_by(History.timestamp.desc()).limit(50).all()
         history_list = [r.to_dict() for r in history_records]
+        t_history = time.time()
         
         # 4. Favorites
         favs = Favorite.query.filter_by(user_id=user_id).all()
@@ -1602,6 +1607,7 @@ def get_dashboard_data():
             (Playlist.collaborators.any(id=user_id))
         ).all()
         playlists_list = [p.to_dict() for p in pl]
+        t_favs = time.time()
         
         # 6. Insights
         insights_data = None
@@ -1610,6 +1616,7 @@ def get_dashboard_data():
             insights_data = get_user_insights(user_id)
         except Exception as ie:
             logger.error(f"Batch dashboard insights error: {ie}")
+        t_insights = time.time()
             
         # 7. Dynamic Mood
         dmi_data = None
@@ -1618,6 +1625,7 @@ def get_dashboard_data():
             dmi_data = predict_mood_intelligence(user_id)
         except Exception as me:
             logger.error(f"Batch dashboard DMI error: {me}")
+        t_dmi = time.time()
             
         # 8. Throwback
         throwback_data = None
@@ -1666,8 +1674,12 @@ def get_dashboard_data():
         except Exception as te:
             logger.error(f"Batch dashboard throwback error: {te}")
             db.session.rollback()
-            
-        return jsonify({
+        t_throwback = time.time()
+        
+        timings = f"trending={t_trending-t_start:.3f}s, recs={t_rec-t_trending:.3f}s, history={t_history-t_rec:.3f}s, favs={t_favs-t_history:.3f}s, insights={t_insights-t_favs:.3f}s, dmi={t_dmi-t_insights:.3f}s, throwback={t_throwback-t_dmi:.3f}s"
+        logger.info(f"PROFILE: {timings}")
+
+        response = jsonify({
             'trending': trending_songs,
             'recommendations': {
                 'mood': detected_emotion,
@@ -1680,7 +1692,9 @@ def get_dashboard_data():
             'insights': insights_data,
             'dynamic_mood': dmi_data,
             'throwback': throwback_data
-        }), 200
+        })
+        response.headers['X-Profile-Timings'] = timings
+        return response, 200
         
     except Exception as e:
         logger.error(f"Batch dashboard data route error: {e}")
