@@ -158,20 +158,74 @@ def predict_mood_intelligence(user_id):
     """
     now = datetime.utcnow()
     
-    # 1. Fetch current live features at 'now'
-    session_songs, session_dur_mins, is_session_active = get_active_session_features(user_id, now)
-    chat_stress, chat_fatigue, chat_count = get_nlp_sentiment_features(user_id, now)
-    face_stress, face_anxiety, face_fatigue, face_age_hours = get_decayed_face_features(user_id, now)
+    # 1. Pre-fetch all user history and chat logs in exactly two queries
+    history_list = History.query.filter_by(user_id=user_id).order_by(History.timestamp.desc()).all()
+    chat_logs = ChatLog.query.filter_by(user_id=user_id).order_by(ChatLog.timestamp.desc()).all()
+
+    # Local in-memory helpers to completely avoid database queries in loop
+    def get_active_session_features_in_memory(target_time):
+        history = [r for r in history_list if r.timestamp <= target_time]
+        if not history:
+            return 0, 0.0, False
+
+        time_since_last_play = (target_time - history[0].timestamp).total_seconds() / 3600.0
+        if time_since_last_play >= 1.0:
+            return 0, 0.0, False
+
+        session_records = [history[0]]
+        for i in range(1, len(history)):
+            gap = (history[i-1].timestamp - history[i].timestamp).total_seconds() / 3600.0
+            if gap < 1.0:
+                session_records.append(history[i])
+            else:
+                break
+
+        earliest_t = session_records[-1].timestamp
+        latest_t = session_records[0].timestamp
+        duration_mins = (latest_t - earliest_t).total_seconds() / 60.0
+
+        if len(session_records) == 1:
+            duration_mins = 3.0
+
+        return len(session_records), duration_mins, True
+
+    def get_nlp_sentiment_features_in_memory(target_time, lookback_hours=2):
+        start_time = target_time - timedelta(hours=lookback_hours)
+        logs = [log for log in chat_logs if start_time <= log.timestamp <= target_time]
+        if not logs:
+            return 0.0, 0.0, 0
+        avg_stress = sum(log.stress for log in logs) / len(logs)
+        avg_fatigue = sum(log.fatigue for log in logs) / len(logs)
+        return avg_stress, avg_fatigue, len(logs)
+
+    def get_decayed_face_features_in_memory(target_time):
+        latest_scan = None
+        for r in history_list:
+            if r.timestamp < target_time and (r.stress_detected > 0 or r.anxiety_detected > 0 or r.fatigue_detected > 0):
+                latest_scan = r
+                break
+        if not latest_scan:
+            return 0.0, 0.0, 0.0, 999.0
+
+        hours_elapsed = (target_time - latest_scan.timestamp).total_seconds() / 3600.0
+        decay_factor = math.exp(-DECAY_RATE_PER_HOUR * hours_elapsed)
+        stress_decayed = latest_scan.stress_detected * decay_factor
+        anxiety_decayed = latest_scan.anxiety_detected * decay_factor
+        fatigue_decayed = latest_scan.fatigue_detected * decay_factor
+        return stress_decayed, anxiety_decayed, fatigue_decayed, hours_elapsed
+
+    # 2. Fetch current live features at 'now'
+    session_songs, session_dur_mins, is_session_active = get_active_session_features_in_memory(now)
+    chat_stress, chat_fatigue, chat_count = get_nlp_sentiment_features_in_memory(now)
+    face_stress, face_anxiety, face_fatigue, face_age_hours = get_decayed_face_features_in_memory(now)
     
     current_hour = now.hour
     current_weekday = now.weekday()
     
     # Check if we have enough historical data to fit a custom personalization model
-    # We query history records that represent a face scan point (i.e. has non-zero face scan values)
-    past_scans = History.query.filter(
-        History.user_id == user_id,
-        (History.stress_detected > 0) | (History.anxiety_detected > 0) | (History.fatigue_detected > 0)
-    ).order_by(History.timestamp.asc()).all()
+    # We filter history records that represent a face scan point from the pre-fetched list
+    past_scans = [r for r in history_list if r.stress_detected > 0 or r.anxiety_detected > 0 or r.fatigue_detected > 0]
+    past_scans.sort(key=lambda r: r.timestamp)  # Sort ascending for time-series lag ordering
     
     trained_ml = False
     predicted_stress = 0.0
@@ -190,16 +244,15 @@ def predict_mood_intelligence(user_id):
                 scan_time = scan.timestamp
                 
                 # Compute features *right before* this scan's timestamp
-                s_songs, s_dur, _ = get_active_session_features(user_id, scan_time)
-                s_chat_stress, s_chat_fatigue, _ = get_nlp_sentiment_features(user_id, scan_time)
+                s_songs, s_dur, _ = get_active_session_features_in_memory(scan_time)
+                s_chat_stress, s_chat_fatigue, _ = get_nlp_sentiment_features_in_memory(scan_time)
                 
-                # Fetch lag-1 face scan metrics (the scan before this one)
-                # Find the latest scan before scan_time
-                lag_scan = History.query.filter(
-                    History.user_id == user_id,
-                    History.timestamp < scan_time,
-                    (History.stress_detected > 0) | (History.anxiety_detected > 0) | (History.fatigue_detected > 0)
-                ).order_by(History.timestamp.desc()).first()
+                # Fetch lag-1 face scan metrics (the scan before this one) from pre-fetched list
+                lag_scan = None
+                for r in history_list:
+                    if r.timestamp < scan_time and (r.stress_detected > 0 or r.anxiety_detected > 0 or r.fatigue_detected > 0):
+                        lag_scan = r
+                        break
                 
                 if lag_scan:
                     lag_hours = (scan_time - lag_scan.timestamp).total_seconds() / 3600.0
