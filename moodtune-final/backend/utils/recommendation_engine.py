@@ -77,10 +77,16 @@ def train_user_recommendation_model(user_id):
     try:
         history_len, fav_len = get_interaction_counts(user_id)
         
-        # We need at least 3 unique songs played or favorited to run personalization
+        # We need at least 3 unique songs played or favorited to run personalization.
+        # Limit history/favorites to top 30 to make training extremely fast and relevant.
         from sqlalchemy.orm import joinedload
-        history = History.query.filter_by(user_id=user_id).options(joinedload(History.song)).all()
-        favorites = Favorite.query.filter_by(user_id=user_id).options(joinedload(Favorite.song)).all()
+        history = History.query.filter_by(user_id=user_id)\
+            .options(joinedload(History.song))\
+            .order_by(History.timestamp.desc())\
+            .limit(30).all()
+        favorites = Favorite.query.filter_by(user_id=user_id)\
+            .options(joinedload(Favorite.song))\
+            .limit(30).all()
         
         interacted_song_ids = {h.song_id for h in history if h.song_id} | {f.song_id for f in favorites if f.song_id}
         

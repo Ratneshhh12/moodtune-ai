@@ -1597,15 +1597,17 @@ def get_dashboard_data():
         history_list = [r.to_dict() for r in history_records]
         t_history = time.time()
         
-        # 4. Favorites
-        favs = Favorite.query.filter_by(user_id=user_id).all()
+        # 4. Favorites (eager loaded to prevent N+1 queries)
+        from sqlalchemy.orm import joinedload, selectinload
+        favs = Favorite.query.filter_by(user_id=user_id)\
+            .options(joinedload(Favorite.song)).all()
         favorites_list = [f.to_dict() for f in favs]
         
-        # 5. Playlists
+        # 5. Playlists (eager loaded to prevent N+1 queries)
         pl = Playlist.query.filter(
             (Playlist.user_id == user_id) | 
             (Playlist.collaborators.any(id=user_id))
-        ).all()
+        ).options(selectinload(Playlist.songs), selectinload(Playlist.collaborators)).all()
         playlists_list = [p.to_dict() for p in pl]
         t_favs = time.time()
         
