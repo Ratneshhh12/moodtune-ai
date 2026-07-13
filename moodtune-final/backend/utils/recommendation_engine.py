@@ -78,8 +78,9 @@ def train_user_recommendation_model(user_id):
         history_len, fav_len = get_interaction_counts(user_id)
         
         # We need at least 3 unique songs played or favorited to run personalization
-        history = History.query.filter_by(user_id=user_id).all()
-        favorites = Favorite.query.filter_by(user_id=user_id).all()
+        from sqlalchemy.orm import joinedload
+        history = History.query.filter_by(user_id=user_id).options(joinedload(History.song)).all()
+        favorites = Favorite.query.filter_by(user_id=user_id).options(joinedload(Favorite.song)).all()
         
         interacted_song_ids = {h.song_id for h in history if h.song_id} | {f.song_id for f in favorites if f.song_id}
         
@@ -88,11 +89,6 @@ def train_user_recommendation_model(user_id):
             return None, None
 
         logger.info(f"Training personalized recommendation model for User {user_id} (History: {len(history)}, Favorites: {len(favorites)})")
-
-        all_songs = Song.query.all()
-        if not all_songs:
-            logger.warning("No songs found in database to fit recommendation model.")
-            return None, None
 
         # Build positive training samples
         X_cats = []
@@ -124,11 +120,17 @@ def train_user_recommendation_model(user_id):
                 y.append(3.0) # High weight for favorited only
 
         # 3. Negative samples (songs the user has NOT interacted with)
-        non_interacted = [s for s in all_songs if s.id not in interacted_song_ids]
-        
-        # Target size: 2x the positive samples, minimum 30
-        neg_size = min(len(non_interacted), max(30, len(X_cats) * 2))
-        neg_samples = random.sample(non_interacted, neg_size) if non_interacted else []
+        # Fetch 40 random songs directly from DB to prevent loading all database songs
+        neg_samples = []
+        try:
+            if interacted_song_ids:
+                neg_samples = Song.query.filter(~Song.id.in_(interacted_song_ids))\
+                    .order_by(db.func.random()).limit(40).all()
+            else:
+                neg_samples = Song.query.order_by(db.func.random()).limit(40).all()
+        except Exception as ne:
+            logger.warning(f"Error querying negative samples: {ne}")
+            neg_samples = Song.query.order_by(db.func.random()).limit(40).all()
 
         all_moods = ['happy', 'sad', 'angry', 'neutral', 'surprised', 'fearful', 'disgusted']
         for s in neg_samples:
@@ -139,13 +141,13 @@ def train_user_recommendation_model(user_id):
             X_context.append([is_match])
             y.append(0.0) # Target rating is 0
 
-        # Fit SimpleOneHotEncoder on all DB songs to define the category features consistently
-        all_cats = np.array([[s.genre, s.artist, s.mood] for s in all_songs])
+        # Fit SimpleOneHotEncoder on training samples only (handled robustly by ignore handle)
+        train_cats = np.array(X_cats)
         encoder = SimpleOneHotEncoder(handle_unknown='ignore', sparse_output=False)
-        encoder.fit(all_cats)
+        encoder.fit(train_cats)
 
         # Encode training categories and combine with context features
-        X_encoded = encoder.transform(np.array(X_cats))
+        X_encoded = encoder.transform(train_cats)
         X_train = np.hstack((X_encoded, np.array(X_context)))
         y_train = np.array(y)
 
