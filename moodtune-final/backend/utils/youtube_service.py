@@ -10444,46 +10444,27 @@ def _search_fallback_db(query, limit=20):
     return [item[1] for item in scored_results[:limit]]
 
 def _get_active_piped_instances():
-    hardcoded = [
+    # Curated, reliable public Piped instances list to bypass external API fetch overhead
+    return [
+        'https://pipedapi.kavin.rocks',
         'https://api.piped.private.coffee',
         'https://pipedapi.tokhmi.xyz',
-        'https://pipedapi.leptons.xyz',
-        'https://pipedapi.kavin.rocks',
         'https://piped-api.lunar.icu',
+        'https://pipedapi.leptons.xyz',
         'https://piped-api.us.to'
     ]
-    try:
-        resp = requests.get("https://piped-instances.kavin.rocks", timeout=3)
-        if resp.status_code == 200:
-            instances = resp.json()
-            fetched = []
-            for inst in instances:
-                api_url = inst.get('api_url')
-                if api_url and api_url.startswith('http'):
-                    fetched.append(api_url.strip('/'))
-            seen = set()
-            merged = []
-            for url in fetched + hardcoded:
-                url_clean = url.rstrip('/')
-                if url_clean not in seen:
-                    seen.add(url_clean)
-                    merged.append(url_clean)
-            return merged
-    except Exception:
-        pass
-    return hardcoded
 
 def _search_single_instance(inst, query, limit):
     import urllib.parse
     url = f"{inst}/search?q={urllib.parse.quote(query)}&filter=music_songs"
     try:
-        resp = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=3)
+        resp = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=1.5)
         if resp.status_code == 200:
             data = resp.json()
             items = data.get('items', [])
             if not items:
                 url_fallback = f"{inst}/search?q={urllib.parse.quote(query)}&filter=videos"
-                resp_fb = requests.get(url_fallback, headers={'User-Agent': 'Mozilla/5.0'}, timeout=3)
+                resp_fb = requests.get(url_fallback, headers={'User-Agent': 'Mozilla/5.0'}, timeout=1.5)
                 if resp_fb.status_code == 200:
                     data = resp_fb.json()
                     items = data.get('items', [])
@@ -10518,7 +10499,8 @@ def _search_single_instance(inst, query, limit):
 def search_via_piped(query, limit=10):
     """Fallback search using public Piped API instances to bypass YouTube API Key blocks"""
     instances = _get_active_piped_instances()
-    targets = instances[:10]
+    # Query only the top 3 instances to prevent serverless sequential timeout stack delays
+    targets = instances[:3]
     futures = [piped_executor.submit(_search_single_instance, inst, query, limit) for inst in targets]
     for future in as_completed(futures):
         try:
@@ -10533,7 +10515,7 @@ def search_via_piped(query, limit=10):
 def _trending_single_instance(inst, limit):
     url = f"{inst}/trending?region=IN"
     try:
-        resp = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=3)
+        resp = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=1.5)
         if resp.status_code == 200:
             data = resp.json()
             tracks = []
@@ -10566,7 +10548,8 @@ def _trending_single_instance(inst, limit):
 def get_trending_via_piped(limit=12):
     """Fallback trending songs using public Piped API instances"""
     instances = _get_active_piped_instances()
-    targets = instances[:10]
+    # Query only the top 3 instances to prevent serverless sequential timeout stack delays
+    targets = instances[:3]
     futures = [piped_executor.submit(_trending_single_instance, inst, limit) for inst in targets]
     for future in as_completed(futures):
         try:
