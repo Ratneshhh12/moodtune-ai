@@ -2,9 +2,52 @@ import os
 import random
 import logging
 import numpy as np
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.linear_model import Ridge
 from config.database import db
+
+class SimpleOneHotEncoder:
+    def __init__(self, handle_unknown='ignore', sparse_output=False):
+        self.categories_ = []
+        self.feature_map = {}
+
+    def fit(self, X):
+        for col_idx in range(X.shape[1]):
+            unique_vals = sorted(list(set(X[:, col_idx])))
+            self.categories_.append(unique_vals)
+            for val in unique_vals:
+                feature_name = f"{['genre', 'artist', 'mood'][col_idx]}_{val}"
+                self.feature_map[feature_name] = len(self.feature_map)
+        return self
+
+    def transform(self, X):
+        num_features = len(self.feature_map)
+        encoded = np.zeros((X.shape[0], num_features))
+        for row_idx, row in enumerate(X):
+            for col_idx, val in enumerate(row):
+                feature_name = f"{['genre', 'artist', 'mood'][col_idx]}_{val}"
+                if feature_name in self.feature_map:
+                    encoded[row_idx, self.feature_map[feature_name]] = 1.0
+        return encoded
+
+    def get_feature_names_out(self, names=None):
+        sorted_features = sorted(self.feature_map.keys(), key=lambda k: self.feature_map[k])
+        return np.array(sorted_features)
+
+class SimpleRidge:
+    def __init__(self, alpha=1.0):
+        self.alpha = alpha
+        self.coef_ = None
+
+    def fit(self, X, y):
+        num_features = X.shape[1]
+        XTX = np.dot(X.T, X)
+        reg_matrix = self.alpha * np.eye(num_features)
+        inv_matrix = np.linalg.pinv(XTX + reg_matrix)  # Robust pseudo-inverse
+        XTy = np.dot(X.T, y)
+        self.coef_ = np.dot(inv_matrix, XTy)
+        return self
+
+    def predict(self, X):
+        return np.dot(X, self.coef_)
 from models.song import Song
 from models.history import History
 from models.playlist import Favorite
@@ -96,9 +139,9 @@ def train_user_recommendation_model(user_id):
             X_context.append([is_match])
             y.append(0.0) # Target rating is 0
 
-        # Fit OneHotEncoder on all DB songs to define the category features consistently
+        # Fit SimpleOneHotEncoder on all DB songs to define the category features consistently
         all_cats = np.array([[s.genre, s.artist, s.mood] for s in all_songs])
-        encoder = OneHotEncoder(handle_unknown='ignore', sparse_output=False)
+        encoder = SimpleOneHotEncoder(handle_unknown='ignore', sparse_output=False)
         encoder.fit(all_cats)
 
         # Encode training categories and combine with context features
@@ -106,8 +149,8 @@ def train_user_recommendation_model(user_id):
         X_train = np.hstack((X_encoded, np.array(X_context)))
         y_train = np.array(y)
 
-        # Train Ridge Regression model (L2 regularization makes it robust to small data)
-        model = Ridge(alpha=1.0)
+        # Train SimpleRidge Regression model (L2 regularization makes it robust to small data)
+        model = SimpleRidge(alpha=1.0)
         model.fit(X_train, y_train)
 
         # Save to cache

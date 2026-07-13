@@ -11,7 +11,22 @@ import logging
 import math
 from datetime import datetime, timedelta
 import numpy as np
-from sklearn.linear_model import Ridge
+class SimpleRidge:
+    def __init__(self, alpha=1.0):
+        self.alpha = alpha
+        self.coef_ = None
+
+    def fit(self, X, y):
+        num_features = X.shape[1]
+        XTX = np.dot(X.T, X)
+        reg_matrix = self.alpha * np.eye(num_features)
+        inv_matrix = np.linalg.pinv(XTX + reg_matrix)  # Robust pseudo-inverse
+        XTy = np.dot(X.T, y)
+        self.coef_ = np.dot(inv_matrix, XTy)
+        return self
+
+    def predict(self, X):
+        return np.dot(X, self.coef_)
 
 from config.database import db
 from models.history import History
@@ -215,14 +230,14 @@ def predict_mood_intelligence(user_id):
             
             X_arr = np.array(X)
             
-            # Fit Ridge models
-            model_stress = Ridge(alpha=10.0)
+            # Fit SimpleRidge models
+            model_stress = SimpleRidge(alpha=10.0)
             model_stress.fit(X_arr, np.array(y_stress))
             
-            model_fatigue = Ridge(alpha=10.0)
+            model_fatigue = SimpleRidge(alpha=10.0)
             model_fatigue.fit(X_arr, np.array(y_fatigue))
 
-            model_anxiety = Ridge(alpha=10.0)
+            model_anxiety = SimpleRidge(alpha=10.0)
             model_anxiety.fit(X_arr, np.array(y_anxiety))
             
             # Predict
